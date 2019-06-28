@@ -1,0 +1,5 @@
+*.tfvars
+*.exe
+*.old
+*.tfstate
+.terraform/
