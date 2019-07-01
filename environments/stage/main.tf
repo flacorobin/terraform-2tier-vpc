@@ -9,8 +9,9 @@ provider "aws" {
 }
 
 
-module "vpc_name" {
+module "custom_vpc" {
 	source 					= "../../modules/vpc/"
+
 	vpc_cidr_block 	= "10.0.0.0/16"
 
 	public_sn_cidr_block 					= ["10.0.0.0/24", "10.0.1.0/24"]
@@ -23,42 +24,49 @@ module "vpc_name" {
 
 module "webserver_sg" {
 	source 							=	"../../modules/webserver-sg/"
-	webserver_sg_vpc_id = module.vpc_name.vpc_id
+	webserver_sg_vpc_id = module.custom_vpc.vpc_id
 	webserver_sg_ssh_ip = ["0.0.0.0/0"]
 }
 
-
-resource "aws_instance" "WebServer01" {
-#This creates a new EC2 instance
-	ami											= var.amis[var.region]
-	instance_type					 	= "t2.micro"
-	key_name								= "MyEC2KeyPair" #KeyPair to be used on EC2
-	vpc_security_group_ids	=	[module.webserver_sg.id] #Attach existing SG, value expects a list of SG NAMES []
-	subnet_id								=	module.vpc_name.public_sn_id[0]
-	user_data								= "${file("Bootscript_Webservers.sh")}" #reads Bootscript_Webservers.sh file from current directory and loads it as a bootstrap script
-
-	tags						=	{
-			"Name" = "WebServer01"
-	}
-
-	provisioner "local-exec"{
-	command = "echo ${aws_instance.WebServer01.public_ip} > ip_address.txt" #executes command locally, here gets the Public IP of the instance and saves it on a file
-	}
+module "dbserver_sg" {
+	source 							=	"../../modules/dbserver-sg/"
+	dbserver_sg_vpc_id = module.custom_vpc.vpc_id
+	dbserver_sg_ssh_ip = [module.custom_vpc.cidr_block]
 }
 
-resource "aws_instance" "AppServer01" {
+module "webserver" {
 #This creates a new EC2 instance
-	ami											= var.amis[var.region]
-	instance_type					 	= "t2.micro"
-	key_name								= "MyEC2KeyPair" #KeyPair to be used on EC2
-	vpc_security_group_ids	=	[module.webserver_sg.id] #Attach existing SG, value expects a list of SG NAMES []
-	subnet_id								=	module.vpc_name.private_sn_id[0]
-	user_data								= "${file("Bootscript_Webservers.sh")}" #reads Bootscript_Webservers.sh file from current directory and loads it as a bootstrap script
+source 															=	"../../modules/ec2/"
+ec2_ami															=	data.aws_ami.amazon-linux-2.id //data.aws_ami looks for latest ami on AWS. Defined on varaibles.tf
+ec2_instance_number									= 1
+ec2_instance_type										= "t2.micro"
+ec2_key_name												= var.key_pairs[var.region] #KeyPair to be used on EC2
+ec2_vpc_security_group_ids					=	[module.webserver_sg.id] #Attach existing SG, value expects a list of SG NAMES []
+ec2_module_custom_vpc_private_sn_id	=	module.custom_vpc.public_sn_id[0]
+ec2_user_data												= "${file("Bootscript_Webservers.sh")}" #reads Bootscript_Webservers.sh file from current directory and loads it as a bootstrap script
 
-	tags						=	{
-			"Name" = "AppServer01"
-	}
+ec2_tags_name 											= "WebServer"
 }
+
+//	provisioner "local-exec"{
+//	command = "echo ${aws_instance.WebServer01.public_ip} > ip_address.txt" #executes command locally, here gets the Public IP of the instance and saves it on a file
+//	}
+//}
+
+
+module "dbserver" {
+	source 															=	"../../modules/ec2/"
+	ec2_ami															=	data.aws_ami.ubuntu.id //data.aws_ami looks for latest ami on AWS. Defined on varaibles.tf
+	ec2_instance_number									= 1
+	ec2_instance_type										= "t2.micro"
+	ec2_key_name												= var.key_pairs[var.region] #KeyPair to be used on EC2
+	ec2_vpc_security_group_ids					=	[module.dbserver_sg.id] #Attach existing SG, value expects a list of SG NAMES []
+	ec2_module_custom_vpc_private_sn_id	=	module.custom_vpc.private_sn_id[0]
+	#ec2_user_data												= "${file("Bootscript_Webservers.sh")}" #reads Bootscript_Webservers.sh file from current directory and loads it as a bootstrap script
+
+	ec2_tags_name 											= "AppServer"
+}
+
 
 /*
 resource "aws_eip" "ip" {
